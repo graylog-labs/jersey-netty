@@ -17,6 +17,12 @@
         Netty 3 container for Jersey 2.0
     </description>
 
+    <scm>
+        <connection>scm:git:git@github.com:Graylog2/jersey-netty.git</connection>
+        <developerConnection>scm:git:git@github.com:Graylog2/jersey-netty.git</developerConnection>
+        <url>git@github.com:Graylog2/jersey-netty.git</url>
+    </scm>
+
     <build>
         <resources>
             <resource>
