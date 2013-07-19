@@ -38,16 +38,19 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
     private static final class NettyResponseWriter implements ContainerResponseWriter {
 
         private final HttpVersion protocolVersion;
+        private final boolean connectionClose;
         private final Channel channel;
         private DefaultHttpResponse httpResponse;
 
-        public NettyResponseWriter(HttpVersion protocolVersion, Channel channel) {
+        public NettyResponseWriter(HttpVersion protocolVersion, boolean connectionClose, Channel channel) {
             this.protocolVersion = protocolVersion;
+            this.connectionClose = connectionClose;
             this.channel = channel;
         }
 
         @Override
         public OutputStream writeResponseStatusAndHeaders(long contentLength, ContainerResponse responseContext) throws ContainerException {
+            log.trace("Writing response status and headers {}", responseContext);
             httpResponse = new DefaultHttpResponse(protocolVersion, HttpResponseStatus.valueOf(responseContext.getStatus()));
 
             if (contentLength != -1) {
@@ -64,21 +67,34 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         @Override
         public boolean suspend(long timeOut, TimeUnit timeUnit, TimeoutHandler timeoutHandler) {
+            // TODO do we want to support this?
+            log.debug("Trying to suspend for {} ms", timeUnit.toMillis(timeOut));
             return false;
         }
 
         @Override
         public void setSuspendTimeout(long timeOut, TimeUnit timeUnit) throws IllegalStateException {
+            // TODO do we want to support this?
+            log.debug("Setting suspend timeout to {} ms", timeUnit.toMillis(timeOut));
         }
 
         @Override
         public void commit() {
-            channel.write(httpResponse).addListener(ChannelFutureListener.CLOSE);
+            final ChannelFuture channelFuture = channel.write(httpResponse);
+
+            // keep the connection open if we are using HTTP 1.1
+            if (protocolVersion == HttpVersion.HTTP_1_0 || connectionClose) {
+                log.trace("Closing HTTP connection");
+                channelFuture.addListener(ChannelFutureListener.CLOSE);
+            }
         }
 
         @Override
         public void failure(Throwable error) {
-            channel.close();
+            log.error("Uncaught exception in transport layer. This is likely a bug, closing channel.", error);
+            if (channel.isOpen()) {
+                channel.close();
+            }
         }
 
         @Override
@@ -106,7 +122,6 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
     @Override
     public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) throws Exception {
-
         HttpRequest httpRequest = (HttpRequest) e.getMessage();
         URI requestUri = baseUri.resolve(httpRequest.getUri());
 
@@ -119,8 +134,20 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
                 new MapPropertiesDelegate()
         );
 
+        // save the protocol version in case we encounter an exception, where we need it to construct the proper response
+        final HttpVersion protocolVersion = httpRequest.getProtocolVersion();
+        ctx.setAttachment(protocolVersion);
+
         containerRequest.setEntityStream(new ChannelBufferInputStream(httpRequest.getContent()));
-        containerRequest.setWriter(new NettyResponseWriter(httpRequest.getProtocolVersion(), e.getChannel()));
+
+        // for HTTP 1.0 we always close the connection after the request, for 1.1 we look at the Connection header
+        boolean closeConnection = protocolVersion == HttpVersion.HTTP_1_0;
+        final String connectionHeader = httpRequest.getHeader(HttpHeaders.Names.CONNECTION);
+        if (connectionHeader != null && connectionHeader.equals("close")) {
+            closeConnection = true;
+        }
+        containerRequest.setWriter(new NettyResponseWriter(protocolVersion,
+                closeConnection, e.getChannel()));
 
         // *sigh*, netty has a list of Map.Entry and jersey wants a map. :/
         final MultivaluedMap<String,String> headers = containerRequest.getHeaders();
@@ -133,8 +160,25 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
-        log.error("Exception during jersey resource handling", e.getCause());
-        super.exceptionCaught(ctx, e);
+        log.error("Uncaught exception during jersey resource handling", e.getCause());
+        final Channel channel = ctx.getChannel();
+        if (! channel.isOpen()) {
+            log.info("Not writing any response, channel is already closed.", e.getCause());
+            return;
+        }
+        final HttpVersion protocolVersion = (HttpVersion) ctx.getAttachment();
+        final boolean shouldCloseChannel = protocolVersion == HttpVersion.HTTP_1_0;
+
+        final DefaultHttpResponse response = new DefaultHttpResponse(protocolVersion, HttpResponseStatus.INTERNAL_SERVER_ERROR);
+        final ChannelBuffer buffer = ChannelBuffers.dynamicBuffer();
+        new ChannelBufferOutputStream(buffer).writeBytes(e.toString());
+        response.setContent(buffer);
+
+        final ChannelFuture channelFuture = channel.write(response);
+
+        if (shouldCloseChannel) {
+            channelFuture.addListener(ChannelFutureListener.CLOSE);
+        }
     }
 
     // TODO implement something useful here.
