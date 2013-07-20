@@ -23,6 +23,14 @@
         <url>git@github.com:Graylog2/jersey-netty.git</url>
     </scm>
 
+    <licenses>
+        <license>
+            <name>The Apache Software License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <!-- had to duplicate the sonatype oss parent info here, because we already inherit the jersey-project pom -->
     <repositories>
         <repository>
