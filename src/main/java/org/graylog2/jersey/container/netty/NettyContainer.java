@@ -17,6 +17,7 @@
 package org.graylog2.jersey.container.netty;
 
 import org.glassfish.jersey.internal.MapPropertiesDelegate;
+import org.glassfish.jersey.internal.util.Base64;
 import org.glassfish.jersey.server.*;
 import org.glassfish.jersey.server.spi.Container;
 import org.glassfish.jersey.server.spi.ContainerResponseWriter;
@@ -33,7 +34,6 @@ import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.SecurityContext;
 import java.io.OutputStream;
 import java.net.URI;
-import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -44,11 +44,21 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
     public static final String PROPERTY_BASE_URI = "org.graylog2.jersey.container.netty.baseUri";
 
     private final ApplicationHandler appHandler;
+    private SecurityContextFactory securityContextFactory;
     private final URI baseUri;
 
     public NettyContainer(ApplicationHandler appHandler) {
+        this(appHandler, null);
+    }
+
+    public NettyContainer(ApplicationHandler appHandler, SecurityContextFactory securityContextFactory) {
         this.appHandler = appHandler;
+        this.securityContextFactory = securityContextFactory;
         this.baseUri = (URI) this.getConfiguration().getProperty(PROPERTY_BASE_URI);
+    }
+
+    public void setSecurityContextFactory(SecurityContextFactory securityContextFactory) {
+        this.securityContextFactory = securityContextFactory;
     }
 
     private static final class NettyResponseWriter implements ContainerResponseWriter {
@@ -141,12 +151,27 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         HttpRequest httpRequest = (HttpRequest) e.getMessage();
         URI requestUri = baseUri.resolve(httpRequest.getUri());
 
+        // default to a simple security context factory, which is mostly useless, really.
+        if (securityContextFactory == null) {
+            securityContextFactory = new DefaultSecurityContextFactory();
+        }
+        // TODO we currently only support Basic Auth
+        String[] schemeCreds = extractBasicAuthCredentials(httpRequest.getHeader(HttpHeaders.Names.AUTHORIZATION));
+        String scheme = null;
+        String user = null;
+        String password = null;
+        if (schemeCreds != null) {
+            scheme = schemeCreds[0];
+            user = schemeCreds[1];
+            password = schemeCreds[2];
+        }
+
         boolean isSecure = requestUri.getScheme().equalsIgnoreCase("https");
         ContainerRequest containerRequest = new ContainerRequest(
                 baseUri,
                 requestUri,
                 httpRequest.getMethod().getName(),
-                getSecurityContext(isSecure),
+                securityContextFactory.create(user, password, isSecure, scheme, e.getRemoteAddress().toString()),
                 new MapPropertiesDelegate()
         );
 
@@ -166,7 +191,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
                 closeConnection, e.getChannel()));
 
         // *sigh*, netty has a list of Map.Entry and jersey wants a map. :/
-        final MultivaluedMap<String,String> headers = containerRequest.getHeaders();
+        final MultivaluedMap<String, String> headers = containerRequest.getHeaders();
         for (Map.Entry<String, String> header : httpRequest.getHeaders()) {
             headers.add(header.getKey(), header.getValue());
         }
@@ -174,11 +199,32 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
     }
 
+    /* horrible, looks like rubby */
+    private String[] extractBasicAuthCredentials(String authorizationHeader) {
+        if (authorizationHeader == null) {
+            return null;
+        }
+        String[] schemeUserPass = new String[3];
+        String credentials;
+        final String[] headerParts = authorizationHeader.split(" ");
+        if (headerParts != null && headerParts.length == 2) {
+            schemeUserPass[0] = headerParts[0].equalsIgnoreCase("basic") ? SecurityContext.BASIC_AUTH : null;
+            credentials = Base64.decodeAsString(headerParts[1]);
+            final String[] userPass = credentials.split(":");
+            if (userPass != null && userPass.length == 2) {
+                schemeUserPass[1] = userPass[0];
+                schemeUserPass[2] = userPass[1];
+            }
+            return schemeUserPass;
+        }
+        return null;
+    }
+
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
         log.error("Uncaught exception during jersey resource handling", e.getCause());
         final Channel channel = ctx.getChannel();
-        if (! channel.isOpen()) {
+        if (!channel.isOpen()) {
             log.info("Not writing any response, channel is already closed.", e.getCause());
             return;
         }
@@ -197,28 +243,4 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         }
     }
 
-    // TODO implement something useful here.
-    private SecurityContext getSecurityContext(final boolean isSecure) {
-        return new SecurityContext() {
-            @Override
-            public Principal getUserPrincipal() {
-                return null;
-            }
-
-            @Override
-            public boolean isUserInRole(String role) {
-                return false;
-            }
-
-            @Override
-            public boolean isSecure() {
-                return isSecure;
-            }
-
-            @Override
-            public String getAuthenticationScheme() {
-                return null;
-            }
-        };
-    }
 }
