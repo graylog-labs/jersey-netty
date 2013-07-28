@@ -177,7 +177,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         // save the protocol version in case we encounter an exception, where we need it to construct the proper response
         final HttpVersion protocolVersion = httpRequest.getProtocolVersion();
-        ctx.setAttachment(protocolVersion);
+        ctx.setAttachment(httpRequest);
 
         containerRequest.setEntityStream(new ChannelBufferInputStream(httpRequest.getContent()));
 
@@ -228,8 +228,8 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
             log.info("Not writing any response, channel is already closed.", e.getCause());
             return;
         }
-        final HttpVersion protocolVersion = (HttpVersion) ctx.getAttachment();
-        final boolean shouldCloseChannel = protocolVersion == HttpVersion.HTTP_1_0;
+        final HttpRequest request = (HttpRequest) ctx.getAttachment();
+        final HttpVersion protocolVersion = request.getProtocolVersion();
 
         final DefaultHttpResponse response = new DefaultHttpResponse(protocolVersion, HttpResponseStatus.INTERNAL_SERVER_ERROR);
         final ChannelBuffer buffer = ChannelBuffers.dynamicBuffer();
@@ -238,7 +238,8 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         final ChannelFuture channelFuture = channel.write(response);
 
-        if (shouldCloseChannel) {
+        if ((protocolVersion == HttpVersion.HTTP_1_0)
+                || request.getHeader(HttpHeaders.Names.CONNECTION).equalsIgnoreCase("close")) {
             channelFuture.addListener(ChannelFutureListener.CLOSE);
         }
     }
