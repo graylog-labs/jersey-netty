@@ -76,12 +76,15 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         @Override
         public OutputStream writeResponseStatusAndHeaders(long contentLength, ContainerResponse responseContext) throws ContainerException {
-            log.trace("Writing response status and headers {}", responseContext);
             httpResponse = new DefaultHttpResponse(protocolVersion, HttpResponseStatus.valueOf(responseContext.getStatus()));
 
-            if (contentLength != -1) {
-                HttpHeaders.setContentLength(httpResponse, contentLength);
+            long length = contentLength;
+            if (length == -1 && responseContext.getEntity() instanceof String) { // TODO there's got to be a better way...
+                length = ((String) responseContext.getEntity()).length();
             }
+            HttpHeaders.setContentLength(httpResponse, length);
+            log.trace("Writing response status and headers {}, length {}", responseContext, length);
+
             for (Map.Entry<String, List<Object>> headerEntry : responseContext.getHeaders().entrySet()) {
                 httpResponse.addHeader(headerEntry.getKey(), headerEntry.getValue());
             }
