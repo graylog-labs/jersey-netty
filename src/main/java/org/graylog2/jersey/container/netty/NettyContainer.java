@@ -34,6 +34,7 @@ import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.SecurityContext;
 import java.io.OutputStream;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -80,7 +81,9 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
             long length = contentLength;
             if (length == -1 && responseContext.getEntity() instanceof String) { // TODO there's got to be a better way...
-                length = ((String) responseContext.getEntity()).length();
+                final String entity = (String) responseContext.getEntity();
+                final byte[] encodedBytes = entity.getBytes(Charset.forName("UTF-8"));
+                length = encodedBytes.length;
             }
             HttpHeaders.setContentLength(httpResponse, length);
             log.trace("Writing response status and headers {}, length {}", responseContext, length);
