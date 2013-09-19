@@ -89,12 +89,25 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
             log.trace("Writing response status and headers {}, length {}", responseContext, length);
 
             for (Map.Entry<String, List<Object>> headerEntry : responseContext.getHeaders().entrySet()) {
-                httpResponse.addHeader(headerEntry.getKey(), headerEntry.getValue());
+                httpResponse.addHeader(headerEntry.getKey(), join(headerEntry.getValue(), ", "));
             }
 
             ChannelBuffer buffer = ChannelBuffers.dynamicBuffer();
             httpResponse.setContent(buffer);
             return new ChannelBufferOutputStream(buffer);
+        }
+
+        private static String join(List<Object> list, String delimiter) {
+            final StringBuilder sb = new StringBuilder();
+            String currentDelimiter = "";
+
+            for(Object o : list) {
+                sb.append(currentDelimiter);
+                sb.append(o.toString());
+                currentDelimiter = delimiter;
+            }
+
+            return sb.toString();
         }
 
         @Override
