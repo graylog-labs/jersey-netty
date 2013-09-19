@@ -85,8 +85,10 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
                 final byte[] encodedBytes = entity.getBytes(Charset.forName("UTF-8"));
                 length = encodedBytes.length;
             }
-            HttpHeaders.setContentLength(httpResponse, length);
-            log.trace("Writing response status and headers {}, length {}", responseContext, length);
+            if (HttpHeaders.getContentLength(httpResponse) == 0L) {
+                HttpHeaders.setContentLength(httpResponse, length);
+                log.trace("Writing response status and headers {}, length {}", responseContext, length);
+            }
 
             for (Map.Entry<String, List<Object>> headerEntry : responseContext.getHeaders().entrySet()) {
                 httpResponse.addHeader(headerEntry.getKey(), join(headerEntry.getValue(), ", "));
