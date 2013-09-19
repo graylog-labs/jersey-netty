@@ -85,7 +85,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
                 final byte[] encodedBytes = entity.getBytes(Charset.forName("UTF-8"));
                 length = encodedBytes.length;
             }
-            if (HttpHeaders.getContentLength(httpResponse) == 0L) {
+            if (! responseContext.getHeaders().containsKey(HttpHeaders.Names.CONTENT_LENGTH)) {
                 HttpHeaders.setContentLength(httpResponse, length);
                 log.trace("Writing response status and headers {}, length {}", responseContext, length);
             }
@@ -211,12 +211,13 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         containerRequest.setWriter(new NettyResponseWriter(protocolVersion,
                 closeConnection, e.getChannel()));
 
+        appHandler.handle(containerRequest);
+
         // *sigh*, netty has a list of Map.Entry and jersey wants a map. :/
         final MultivaluedMap<String, String> headers = containerRequest.getHeaders();
         for (Map.Entry<String, String> header : httpRequest.getHeaders()) {
             headers.add(header.getKey(), header.getValue());
         }
-        appHandler.handle(containerRequest);
 
     }
 
