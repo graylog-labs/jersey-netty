@@ -202,6 +202,12 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         containerRequest.setEntityStream(new ChannelBufferInputStream(httpRequest.getContent()));
 
+        // copy the incoming headers over...
+        final MultivaluedMap<String, String> incomingHeaders = containerRequest.getHeaders();
+        for (Map.Entry<String, String> headerEntry : httpRequest.getHeaders()) {
+            incomingHeaders.add(headerEntry.getKey(), headerEntry.getValue());
+        }
+
         // for HTTP 1.0 we always close the connection after the request, for 1.1 we look at the Connection header
         boolean closeConnection = protocolVersion == HttpVersion.HTTP_1_0;
         final String connectionHeader = httpRequest.getHeader(HttpHeaders.Names.CONNECTION);
