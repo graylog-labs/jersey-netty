@@ -240,7 +240,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
             credentials = Base64.decodeAsString(headerParts[1]);
             final String[] userPass = credentials.split(":");
             if (userPass != null && userPass.length == 2) {
-                schemeUserPass[1] = userPass[0];
+                schemeUserPass[1] = userPass[0].replaceAll("%40", "@");
                 schemeUserPass[2] = userPass[1];
             }
             return schemeUserPass;
