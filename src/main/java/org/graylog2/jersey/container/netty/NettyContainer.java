@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.SecurityContext;
 import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.List;
@@ -68,6 +69,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         private final boolean connectionClose;
         private final Channel channel;
         private DefaultHttpResponse httpResponse;
+        private ChannelBuffer buffer;
 
         public NettyResponseWriter(HttpVersion protocolVersion, boolean connectionClose, Channel channel) {
             this.protocolVersion = protocolVersion;
@@ -78,6 +80,9 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         @Override
         public OutputStream writeResponseStatusAndHeaders(long contentLength, ContainerResponse responseContext) throws ContainerException {
             httpResponse = new DefaultHttpResponse(protocolVersion, HttpResponseStatus.valueOf(responseContext.getStatus()));
+
+            // use this buffer for writing the response entity data into.
+            buffer = ChannelBuffers.dynamicBuffer();
 
             long length = contentLength;
             if (length == -1 && responseContext.getEntity() instanceof String) { // TODO there's got to be a better way...
@@ -91,11 +96,19 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
             }
 
             for (Map.Entry<String, List<Object>> headerEntry : responseContext.getHeaders().entrySet()) {
-                httpResponse.addHeader(headerEntry.getKey(), join(headerEntry.getValue(), ", "));
+                HttpHeaders.addHeader(httpResponse, headerEntry.getKey(), join(headerEntry.getValue(), ", "));
+            }
+            if (protocolVersion.equals(HttpVersion.HTTP_1_1) && HttpHeaders.getContentLength(httpResponse, -3L) != -3L) {
+                httpResponse.setChunked(true);
+                HttpHeaders.setTransferEncodingChunked(httpResponse);
+                // write the first chunk's headers right away
+                channel.write(httpResponse);
+            } else {
+                // we also need to write the response into the same http message if we don't chunk the response.
+                httpResponse.setContent(buffer);
             }
 
-            ChannelBuffer buffer = ChannelBuffers.dynamicBuffer();
-            httpResponse.setContent(buffer);
+            // we could also chunk right away, but i can't figure out jersey right now
             return new ChannelBufferOutputStream(buffer);
         }
 
@@ -127,12 +140,23 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         @Override
         public void commit() {
-            final ChannelFuture channelFuture = channel.write(httpResponse);
-
-            // keep the connection open if we are using HTTP 1.1
-            if (protocolVersion == HttpVersion.HTTP_1_0 || connectionClose) {
-                log.trace("Closing HTTP connection");
-                channelFuture.addListener(ChannelFutureListener.CLOSE);
+            if (channel.isOpen()) {
+                final ChannelFuture channelFuture;
+                if (httpResponse.isChunked()) {
+                    // write the entire body entity as one chunk, we could optimize this to collect smaller chunks by
+                    // returning a customize outputstream in writeResponseStatusAndHeaders()
+                    DefaultHttpChunk httpChunk = new DefaultHttpChunk(buffer);
+                    channel.write(httpChunk);
+                    channelFuture = channel.write(new DefaultHttpChunkTrailer());
+                } else {
+                    // we don't chunk the response so we simply write it in one go.
+                    channelFuture = channel.write(httpResponse);
+                }
+                if (connectionClose) {
+                    channelFuture.addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    channelFuture.addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
+                }
             }
         }
 
@@ -140,7 +164,16 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         public void failure(Throwable error) {
             log.error("Uncaught exception in transport layer. This is likely a bug, closing channel.", error);
             if (channel.isOpen()) {
-                channel.close();
+                if (channel.isWritable()) {
+                    final DefaultHttpResponse internalServerResponse = new DefaultHttpResponse(HttpVersion.HTTP_1_0, HttpResponseStatus.INTERNAL_SERVER_ERROR);
+                    try {
+                        internalServerResponse.setContent(ChannelBuffers.wrappedBuffer(("Uncaught exception!\n"
+                                + error.getMessage()).getBytes("UTF-8")));
+                    } catch (UnsupportedEncodingException ignored) {}
+                    channel.write(internalServerResponse).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    channel.close();
+                }
             }
         }
 
@@ -177,7 +210,8 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
             securityContextFactory = new DefaultSecurityContextFactory();
         }
         // TODO we currently only support Basic Auth
-        String[] schemeCreds = extractBasicAuthCredentials(httpRequest.getHeader(HttpHeaders.Names.AUTHORIZATION));
+        String[] schemeCreds = extractBasicAuthCredentials(HttpHeaders.getHeader(httpRequest,
+                                                                                 HttpHeaders.Names.AUTHORIZATION));
         String scheme = null;
         String user = null;
         String password = null;
@@ -204,13 +238,13 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         // copy the incoming headers over...
         final MultivaluedMap<String, String> incomingHeaders = containerRequest.getHeaders();
-        for (Map.Entry<String, String> headerEntry : httpRequest.getHeaders()) {
+        for (Map.Entry<String, String> headerEntry : httpRequest.headers()) {
             incomingHeaders.add(headerEntry.getKey(), headerEntry.getValue());
         }
 
         // for HTTP 1.0 we always close the connection after the request, for 1.1 we look at the Connection header
         boolean closeConnection = protocolVersion == HttpVersion.HTTP_1_0;
-        final String connectionHeader = httpRequest.getHeader(HttpHeaders.Names.CONNECTION);
+        final String connectionHeader = HttpHeaders.getHeader(httpRequest, HttpHeaders.Names.CONNECTION);
         if (connectionHeader != null && connectionHeader.equals("close")) {
             closeConnection = true;
         }
@@ -221,7 +255,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         // *sigh*, netty has a list of Map.Entry and jersey wants a map. :/
         final MultivaluedMap<String, String> headers = containerRequest.getHeaders();
-        for (Map.Entry<String, String> header : httpRequest.getHeaders()) {
+        for (Map.Entry<String, String> header : httpRequest.headers()) {
             headers.add(header.getKey(), header.getValue());
         }
 
@@ -267,7 +301,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         final ChannelFuture channelFuture = channel.write(response);
 
         if ((protocolVersion == HttpVersion.HTTP_1_0)
-                || request.getHeader(HttpHeaders.Names.CONNECTION).equalsIgnoreCase("close")) {
+                || HttpHeaders.getHeader(request, HttpHeaders.Names.CONNECTION).equalsIgnoreCase("close")) {
             channelFuture.addListener(ChannelFutureListener.CLOSE);
         }
     }
