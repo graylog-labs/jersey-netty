@@ -12,11 +12,12 @@
     <groupId>org.graylog2</groupId>
     <artifactId>jersey-netty</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <name>jersey-netty</name>
     <packaging>jar</packaging>
     <description>
         Netty 3 container for Jersey 2.0
     </description>
-
+    <url>https://github.com/Graylog2/jersey-netty</url>
     <scm>
         <connection>scm:git:git@github.com:Graylog2/jersey-netty.git</connection>
         <developerConnection>scm:git:git@github.com:Graylog2/jersey-netty.git</developerConnection>
@@ -32,7 +33,7 @@
     </licenses>
 
     <!-- had to duplicate the sonatype oss parent info here, because we already inherit the jersey-project pom -->
-    <repositories>
+    <!-- repositories>
         <repository>
             <id>sonatype-nexus-snapshots</id>
             <name>Sonatype Nexus Snapshots</name>
@@ -44,7 +45,7 @@
                 <enabled>true</enabled>
             </snapshots>
         </repository>
-    </repositories>
+    </repositories -->
 
 
     <distributionManagement>
