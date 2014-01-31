@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Kay Roepke
+ * Copyright 2013-2014 TORCH GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,4 +47,5 @@ public class DefaultSecurityContextFactory implements SecurityContextFactory {
             }
         };
     }
+
 }

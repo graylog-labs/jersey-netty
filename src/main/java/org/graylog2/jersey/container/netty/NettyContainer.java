@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Kay Roepke
+ * Copyright 2013-2014 TORCH GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package org.graylog2.jersey.container.netty;
 
 import org.glassfish.jersey.internal.MapPropertiesDelegate;
 import org.glassfish.jersey.internal.util.Base64;
+import org.glassfish.jersey.message.internal.HttpDateFormat;
 import org.glassfish.jersey.server.*;
 import org.glassfish.jersey.server.spi.Container;
 import org.glassfish.jersey.server.spi.ContainerResponseWriter;
@@ -34,16 +35,22 @@ import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.SecurityContext;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+/*
+ OMG this is getting to be such a hack.
+ */
 public class NettyContainer extends SimpleChannelUpstreamHandler implements Container {
     private static final Logger log = LoggerFactory.getLogger(NettyContainer.class);
 
     public static final String PROPERTY_BASE_URI = "org.graylog2.jersey.container.netty.baseUri";
+    public static final String REQUEST_PROPERTY_REMOTE_ADDR = "org.graylog2.jersey.container.netty.request.property.remote_addr";
 
     private final ApplicationHandler appHandler;
     private SecurityContextFactory securityContextFactory;
@@ -222,13 +229,20 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         }
 
         boolean isSecure = requestUri.getScheme().equalsIgnoreCase("https");
+        final SecurityContext securityContext = securityContextFactory.create(user,
+                                                                              password,
+                                                                              isSecure,
+                                                                              scheme,
+                                                                              ctx.getChannel().getRemoteAddress().toString());
         ContainerRequest containerRequest = new ContainerRequest(
                 baseUri,
                 requestUri,
                 httpRequest.getMethod().getName(),
-                securityContextFactory.create(user, password, isSecure, scheme, e.getRemoteAddress().toString()),
+                securityContext,
                 new MapPropertiesDelegate()
         );
+        final SocketAddress remoteAddress = ctx.getChannel().getRemoteAddress();
+        containerRequest.setProperty(REQUEST_PROPERTY_REMOTE_ADDR, remoteAddress);
 
         // save the protocol version in case we encounter an exception, where we need it to construct the proper response
         final HttpVersion protocolVersion = httpRequest.getProtocolVersion();
@@ -238,6 +252,10 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         // copy the incoming headers over...
         final MultivaluedMap<String, String> incomingHeaders = containerRequest.getHeaders();
+        // this is the case for ShiroSecurityContext
+        if (securityContext instanceof HeaderAwareSecurityContext) {
+            ((HeaderAwareSecurityContext) securityContext).setHeaders(containerRequest.getHeaders());
+        }
         for (Map.Entry<String, String> headerEntry : httpRequest.headers()) {
             incomingHeaders.add(headerEntry.getKey(), headerEntry.getValue());
         }
@@ -251,6 +269,9 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         containerRequest.setWriter(new NettyResponseWriter(protocolVersion,
                 closeConnection, e.getChannel()));
 
+        // see http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html, sec 14.18 Date.
+        final Date responseDate = new Date();
+        containerRequest.getHeaders().add(HttpHeaders.Names.DATE, HttpDateFormat.getPreferedDateFormat().format(responseDate));
         appHandler.handle(containerRequest);
 
         // *sigh*, netty has a list of Map.Entry and jersey wants a map. :/
