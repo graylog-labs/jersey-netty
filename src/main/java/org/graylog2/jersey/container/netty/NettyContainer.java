@@ -76,7 +76,6 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         private final boolean connectionClose;
         private final Channel channel;
         private DefaultHttpResponse httpResponse;
-        private ChannelBuffer buffer;
 
         public NettyResponseWriter(HttpVersion protocolVersion, boolean connectionClose, Channel channel) {
             this.protocolVersion = protocolVersion;
@@ -87,9 +86,6 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         @Override
         public OutputStream writeResponseStatusAndHeaders(long contentLength, ContainerResponse responseContext) throws ContainerException {
             httpResponse = new DefaultHttpResponse(protocolVersion, HttpResponseStatus.valueOf(responseContext.getStatus()));
-
-            // use this buffer for writing the response entity data into.
-            buffer = ChannelBuffers.dynamicBuffer();
 
             long length = contentLength;
             if (length == -1 && responseContext.getEntity() instanceof String) { // TODO there's got to be a better way...
@@ -110,13 +106,35 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
                 HttpHeaders.setTransferEncodingChunked(httpResponse);
                 // write the first chunk's headers right away
                 channel.write(httpResponse);
+
+                // be sure to copy the arrays into buffers here, because they get re-used internally!
+                return new OutputStream() {
+                    @Override
+                    public void write(byte[] b, int off, int len) {
+                        final ChannelBuffer buffer = ChannelBuffers.copiedBuffer(b, off, len);
+                        if (log.isTraceEnabled()) {
+                            log.trace("writing data: {}", buffer.toString(Charset.defaultCharset()));
+                        }
+                        channel.write(new DefaultHttpChunk(buffer));
+                        if (log.isDebugEnabled()) {
+                            log.debug("wrote {} bytes as chunk", len);
+                        }
+                    }
+
+                    @Override
+                    public void write(int b) {
+                        ChannelBuffer content = ChannelBuffers.copiedBuffer(new byte[]{(byte) b});
+                        if (log.isTraceEnabled()) {
+                            log.trace("writing data: {}", content.toString(Charset.defaultCharset()));
+                        }
+                        channel.write(new DefaultHttpChunk(content));
+                    }
+                };
             } else {
                 // we also need to write the response into the same http message if we don't chunk the response.
-                httpResponse.setContent(buffer);
+                httpResponse.setContent(ChannelBuffers.dynamicBuffer());
+                return new ChannelBufferOutputStream(httpResponse.getContent());
             }
-
-            // we could also chunk right away, but i can't figure out jersey right now
-            return new ChannelBufferOutputStream(buffer);
         }
 
         private static String join(List<Object> list, String delimiter) {
@@ -135,7 +153,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         @Override
         public boolean suspend(long timeOut, TimeUnit timeUnit, TimeoutHandler timeoutHandler) {
             // TODO do we want to support this?
-            log.debug("Trying to suspend for {} ms", timeUnit.toMillis(timeOut));
+            log.debug("Trying to suspend for {} ms, handler {}", timeUnit.toMillis(timeOut), timeoutHandler);
             return false;
         }
 
@@ -150,16 +168,21 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
             if (channel.isOpen()) {
                 final ChannelFuture channelFuture;
                 if (httpResponse.isChunked()) {
-                    // write the entire body entity as one chunk, we could optimize this to collect smaller chunks by
-                    // returning a customize outputstream in writeResponseStatusAndHeaders()
-                    DefaultHttpChunk httpChunk = new DefaultHttpChunk(buffer);
-                    channel.write(httpChunk);
+                    if (log.isTraceEnabled()) {
+                        log.trace("Writing last chunk to {}", channel.getRemoteAddress());
+                    }
                     channelFuture = channel.write(new DefaultHttpChunkTrailer());
                 } else {
                     // we don't chunk the response so we simply write it in one go.
+                    if (log.isTraceEnabled()) {
+                        log.trace("Writing entire {} bytes to client {}",
+                                  httpResponse.getContent().readableBytes(),
+                                  channel.getRemoteAddress());
+                    }
                     channelFuture = channel.write(httpResponse);
                 }
                 if (connectionClose) {
+                    log.debug("Closing connection to {}", channel.getRemoteAddress());
                     channelFuture.addListener(ChannelFutureListener.CLOSE);
                 } else {
                     channelFuture.addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
