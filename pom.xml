@@ -9,7 +9,7 @@
     </parent>
     <groupId>org.graylog2</groupId>
     <artifactId>jersey-netty</artifactId>
-    <version>1.3-SNAPSHOT</version>
+    <version>1.3</version>
     <name>jersey-netty</name>
     <packaging>jar</packaging>
     <description>
