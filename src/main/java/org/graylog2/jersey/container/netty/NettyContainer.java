@@ -233,7 +233,15 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
     @Override
     public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) throws Exception {
         HttpRequest httpRequest = (HttpRequest) e.getMessage();
-        URI requestUri = baseUri.resolve(httpRequest.getUri());
+        URI requestUri;
+        try {
+            requestUri = baseUri.resolve(httpRequest.getUri());
+        } catch (IllegalArgumentException throwable) {
+            log.debug("Client sent invalid URL. Closing connection.");
+            ExceptionEvent exceptionEvent = new DefaultExceptionEvent(ctx.getChannel(), throwable);
+            invalidRequestSent(ctx, exceptionEvent);
+            return;
+        }
 
         // default to a simple security context factory, which is mostly useless, really.
         if (securityContextFactory == null) {
@@ -335,7 +343,12 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
             return;
         }
         final HttpRequest request = (HttpRequest) ctx.getAttachment();
-        final HttpVersion protocolVersion = request.getProtocolVersion();
+        final HttpVersion protocolVersion;
+        if (request != null && request.getProtocolVersion() != null) {
+            protocolVersion = request.getProtocolVersion();
+        } else {
+            protocolVersion = HttpVersion.HTTP_1_0;
+        }
 
         final DefaultHttpResponse response = new DefaultHttpResponse(protocolVersion, HttpResponseStatus.INTERNAL_SERVER_ERROR);
         final ChannelBuffer buffer = ChannelBuffers.dynamicBuffer();
@@ -345,9 +358,29 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         final ChannelFuture channelFuture = channel.write(response);
 
         if ((protocolVersion == HttpVersion.HTTP_1_0)
+                || request == null
                 || HttpHeaders.getHeader(request, HttpHeaders.Names.CONNECTION).equalsIgnoreCase("close")) {
             channelFuture.addListener(ChannelFutureListener.CLOSE);
         }
+    }
+
+    public void invalidRequestSent(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
+        Channel channel = ctx.getChannel();
+        if (channel == null || !channel.isOpen()) {
+            log.info("Not writing any response, channel is already closed.", e.getCause());
+            return;
+        }
+
+        final DefaultHttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_0, HttpResponseStatus.BAD_REQUEST);
+        response.headers().add(HttpHeaders.Names.CONTENT_TYPE, "text/plain");
+        response.headers().add(HttpHeaders.Names.CONNECTION, "close");
+        final ChannelBuffer buffer = ChannelBuffers.dynamicBuffer();
+        new ChannelBufferOutputStream(buffer).writeBytes("Your client has sent a malformed or illegal request.\n");
+        response.setContent(buffer);
+
+        final ChannelFuture channelFuture = channel.write(response);
+
+        channelFuture.addListener(ChannelFutureListener.CLOSE);
     }
 
 }
