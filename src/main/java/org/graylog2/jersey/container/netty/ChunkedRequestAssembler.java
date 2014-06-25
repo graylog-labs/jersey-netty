@@ -12,38 +12,35 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author Dennis Oelkers <dennis@torch.sh>
  */
 public class ChunkedRequestAssembler {
     private static final Logger log = LoggerFactory.getLogger(ChunkedRequestAssembler.class);
-    private static final Map<Channel, List<Object>> chunkMap = Maps.newConcurrentMap();
+    private final ConcurrentMap<Channel, List<HttpChunk>> chunkMap;
+    private final ConcurrentMap<Channel, HttpRequest> initialRequests;
 
-    private final Channel channel;
-
-    public ChunkedRequestAssembler(Channel channel) {
-        this.channel = channel;
+    public ChunkedRequestAssembler() {
+        this.chunkMap = Maps.newConcurrentMap();
+        this.initialRequests = Maps.newConcurrentMap();
     }
 
-    public ChunkedRequestAssembler(Channel channel, HttpRequest httpRequest) {
-        this(channel);
-        if (chunkMap.get(channel) == null)
-            chunkMap.put(channel, new ArrayList<Object>());
-        chunkMap.get(channel).add(httpRequest);
+    public void setup(Channel channel, HttpRequest httpRequest) {
+        chunkMap.putIfAbsent(channel, new ArrayList<HttpChunk>());
+        initialRequests.put(channel, httpRequest);
     }
 
-    public HttpRequest assemble() {
-        List<Object> chunkList = chunkMap.get(this.channel);
-
-        HttpRequest request = (HttpRequest)chunkList.get(0);
+    public HttpRequest assemble(Channel channel) {
+        List<HttpChunk> chunkList = chunkMap.remove(channel);
+        HttpRequest request = initialRequests.remove(channel);
 
         ChannelBuffer dstBuffer = ChannelBuffers.dynamicBuffer();
         request.setContent(dstBuffer);
 
         try {
-            for (Object o : chunkList.subList(1, chunkList.size())) {
-                HttpChunk chunk = (HttpChunk)o;
+            for (HttpChunk chunk : chunkList) {
                 dstBuffer.writeBytes(chunk.getContent());
             }
         } catch (Exception e) {
@@ -53,7 +50,7 @@ public class ChunkedRequestAssembler {
         return request;
     }
 
-    public void addChunk(HttpChunk nextChunk) {
-        chunkMap.get(this.channel).add(nextChunk);
+    public void addChunk(Channel channel, HttpChunk nextChunk) {
+        chunkMap.get(channel).add(nextChunk);
     }
 }

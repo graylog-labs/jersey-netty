@@ -57,6 +57,8 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
     private SecurityContextFactory securityContextFactory;
     private final URI baseUri;
 
+    private final ChunkedRequestAssembler chunkedRequestAssembler;
+
     public NettyContainer(ApplicationHandler appHandler) {
         this(appHandler, null);
     }
@@ -65,6 +67,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         this.appHandler = appHandler;
         this.securityContextFactory = securityContextFactory;
         this.baseUri = (URI) this.getConfiguration().getProperty(PROPERTY_BASE_URI);
+        this.chunkedRequestAssembler = new ChunkedRequestAssembler();
     }
 
     public void setSecurityContextFactory(SecurityContextFactory securityContextFactory) {
@@ -237,7 +240,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         if (e.getMessage() instanceof DefaultHttpRequest) {
             httpRequest = (DefaultHttpRequest) e.getMessage();
             if (httpRequest.isChunked()) {
-                ChunkedRequestAssembler assembler = new ChunkedRequestAssembler(e.getChannel(), httpRequest);
+                chunkedRequestAssembler.setup(e.getChannel(), httpRequest);
 
                 String expectHeader = HttpHeaders.getHeader(httpRequest, HttpHeaders.Names.EXPECT);
                 if (expectHeader != null && expectHeader.equals("100-continue")) {
@@ -249,12 +252,10 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         }
         else if (e.getMessage() instanceof HttpChunk) {
             HttpChunk nextChunk = (HttpChunk)e.getMessage();
-            ChunkedRequestAssembler assembler = new ChunkedRequestAssembler(e.getChannel());
-
-            assembler.addChunk(nextChunk);
+            chunkedRequestAssembler.addChunk(e.getChannel(), nextChunk);
 
             if (nextChunk.isLast()) {
-                httpRequest = assembler.assemble();
+                httpRequest = chunkedRequestAssembler.assemble(e.getChannel());
             } else {
                 final DefaultHttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE);
                 final ChannelFuture channelFuture = e.getChannel().write(response);
