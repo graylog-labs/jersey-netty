@@ -37,6 +37,7 @@ import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.SocketAddress;
 import java.net.URI;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.Charset;
 import java.util.Date;
 import java.util.List;
@@ -232,7 +233,35 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
     @Override
     public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) throws Exception {
-        HttpRequest httpRequest = (HttpRequest) e.getMessage();
+        HttpRequest httpRequest = null;
+        if (e.getMessage() instanceof DefaultHttpRequest) {
+            httpRequest = (DefaultHttpRequest) e.getMessage();
+            if (httpRequest.isChunked()) {
+                ChunkedRequestAssembler assembler = new ChunkedRequestAssembler(e.getChannel(), httpRequest);
+
+                String expectHeader = HttpHeaders.getHeader(httpRequest, HttpHeaders.Names.EXPECT);
+                if (expectHeader != null && expectHeader.equals("100-continue")) {
+                    final DefaultHttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE);
+                    final ChannelFuture channelFuture = e.getChannel().write(response);
+                }
+                return;
+            }
+        }
+        else if (e.getMessage() instanceof HttpChunk) {
+            HttpChunk nextChunk = (HttpChunk)e.getMessage();
+            ChunkedRequestAssembler assembler = new ChunkedRequestAssembler(e.getChannel());
+
+            assembler.addChunk(nextChunk);
+
+            if (nextChunk.isLast()) {
+                httpRequest = assembler.assemble();
+            } else {
+                final DefaultHttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.CONTINUE);
+                final ChannelFuture channelFuture = e.getChannel().write(response);
+                return;
+            }
+        }
+
         URI requestUri;
         try {
             requestUri = baseUri.resolve(httpRequest.getUri());
@@ -336,12 +365,12 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
-        log.error("Uncaught exception during jersey resource handling", e.getCause());
         final Channel channel = ctx.getChannel();
-        if (!channel.isOpen()) {
-            log.info("Not writing any response, channel is already closed.", e.getCause());
+        if (e instanceof ClosedChannelException || channel == null || !channel.isOpen()) {
+            log.debug("Not writing any response, channel is already closed.", e.getCause());
             return;
         }
+        log.error("Uncaught exception during jersey resource handling", e.getCause());
         final HttpRequest request = (HttpRequest) ctx.getAttachment();
         final HttpVersion protocolVersion;
         if (request != null && request.getProtocolVersion() != null) {
@@ -367,7 +396,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
     public void invalidRequestSent(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
         Channel channel = ctx.getChannel();
         if (channel == null || !channel.isOpen()) {
-            log.info("Not writing any response, channel is already closed.", e.getCause());
+            log.debug("Not writing any response, channel is already closed.", e.getCause());
             return;
         }
 
