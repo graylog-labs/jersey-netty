@@ -16,20 +16,20 @@
 
 package org.graylog2.jersey.container.netty;
 
-import org.glassfish.jersey.server.ApplicationHandler;
 import org.glassfish.jersey.server.spi.ContainerProvider;
 
 import javax.ws.rs.ProcessingException;
+import javax.ws.rs.core.Application;
 import javax.ws.rs.ext.Provider;
 
 @Provider
 public class NettyContainerProvider implements ContainerProvider {
 
     @Override
-    public <T> T createContainer(Class<T> type, ApplicationHandler appHandler) throws ProcessingException {
+    public <T> T createContainer(Class<T> type, Application application) throws ProcessingException {
         if (type != NettyContainer.class) {
             return null;
         }
-        return type.cast(new NettyContainer(appHandler));
+        return type.cast(new NettyContainer(application));
     }
 }

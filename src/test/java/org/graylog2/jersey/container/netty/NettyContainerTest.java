@@ -19,10 +19,15 @@
 package org.graylog2.jersey.container.netty;
 
 import com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider;
-import com.google.common.base.Strings;
-import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import com.ning.http.client.*;
+import com.ning.http.client.AsyncHandler;
+import com.ning.http.client.AsyncHttpClient;
+import com.ning.http.client.AsyncHttpClientConfig;
+import com.ning.http.client.HttpResponseBodyPart;
+import com.ning.http.client.HttpResponseHeaders;
+import com.ning.http.client.HttpResponseStatus;
+import com.ning.http.client.ListenableFuture;
+import jersey.repackaged.com.google.common.collect.ImmutableList;
+import jersey.repackaged.com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.glassfish.jersey.process.Inflector;
 import org.glassfish.jersey.server.ChunkedOutput;
 import org.glassfish.jersey.server.ContainerFactory;
@@ -53,7 +58,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.text.MessageFormat;
-import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -75,10 +80,8 @@ public class NettyContainerTest {
                     @Override
                     public void run() {
                         try {
-                            String a = Strings.repeat("a", 8192);
-                            String b = Strings.repeat("b", 8192);
-                            output.write(a);
-                            output.write(b);
+                            output.write(repeat("a", 8192));
+                            output.write(repeat("b", 8192));
                         } catch (IOException e) {
                             fail("writing failed", e);
                         }
@@ -100,10 +103,10 @@ public class NettyContainerTest {
         ListenableFuture<Object> response = client.prepareGet("http://localhost:" + port + "/")
                 .execute(new AsyncHandler<Object>() {
 
-                    private ArrayList<String> chunks = Lists.newArrayList(
-                            Strings.repeat("a", 8192),
-                            Strings.repeat("b", 8192)
-                    );
+                    private List<String> chunks = new ImmutableList.Builder<String>()
+                            .add(repeat("a", 8192))
+                            .add(repeat("b", 8192))
+                            .build();
                     private int chunkIdx = 0;
 
                     @Override
@@ -141,6 +144,14 @@ public class NettyContainerTest {
                 });
         response.get();
         bootstrap.shutdown();
+    }
+
+    private String repeat(final String string, final int count) {
+        final StringBuilder sb = new StringBuilder(string.length() * count);
+        for (int i = 0; i < count; i++) {
+            sb.append(string);
+        }
+        return sb.toString();
     }
 
     public static class Entity {
@@ -209,6 +220,7 @@ public class NettyContainerTest {
                 final ChunkedOutput<Entity> output = new ChunkedOutput<Entity>(Entity.class);
                 new Thread() {
                     int i = 0;
+
                     @Override
                     public void run() {
                         try {

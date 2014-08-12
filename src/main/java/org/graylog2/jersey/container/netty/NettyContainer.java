@@ -19,18 +19,38 @@ package org.graylog2.jersey.container.netty;
 import org.glassfish.jersey.internal.MapPropertiesDelegate;
 import org.glassfish.jersey.internal.util.Base64;
 import org.glassfish.jersey.message.internal.HttpDateFormat;
-import org.glassfish.jersey.server.*;
+import org.glassfish.jersey.server.ApplicationHandler;
+import org.glassfish.jersey.server.ContainerException;
+import org.glassfish.jersey.server.ContainerRequest;
+import org.glassfish.jersey.server.ContainerResponse;
+import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.server.spi.Container;
 import org.glassfish.jersey.server.spi.ContainerResponseWriter;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBufferInputStream;
 import org.jboss.netty.buffer.ChannelBufferOutputStream;
 import org.jboss.netty.buffer.ChannelBuffers;
-import org.jboss.netty.channel.*;
-import org.jboss.netty.handler.codec.http.*;
+import org.jboss.netty.channel.Channel;
+import org.jboss.netty.channel.ChannelFuture;
+import org.jboss.netty.channel.ChannelFutureListener;
+import org.jboss.netty.channel.ChannelHandlerContext;
+import org.jboss.netty.channel.DefaultExceptionEvent;
+import org.jboss.netty.channel.ExceptionEvent;
+import org.jboss.netty.channel.MessageEvent;
+import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
+import org.jboss.netty.handler.codec.http.DefaultHttpChunk;
+import org.jboss.netty.handler.codec.http.DefaultHttpChunkTrailer;
+import org.jboss.netty.handler.codec.http.DefaultHttpRequest;
+import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
+import org.jboss.netty.handler.codec.http.HttpChunk;
+import org.jboss.netty.handler.codec.http.HttpHeaders;
+import org.jboss.netty.handler.codec.http.HttpRequest;
+import org.jboss.netty.handler.codec.http.HttpResponseStatus;
+import org.jboss.netty.handler.codec.http.HttpVersion;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.ws.rs.core.Application;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.SecurityContext;
 import java.io.OutputStream;
@@ -59,12 +79,12 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
     private final ChunkedRequestAssembler chunkedRequestAssembler;
 
-    public NettyContainer(ApplicationHandler appHandler) {
-        this(appHandler, null);
+    public NettyContainer(Application application) {
+        this(application, null);
     }
 
-    public NettyContainer(ApplicationHandler appHandler, SecurityContextFactory securityContextFactory) {
-        this.appHandler = appHandler;
+    public NettyContainer(Application application, SecurityContextFactory securityContextFactory) {
+        this.appHandler = new ApplicationHandler(application);
         this.securityContextFactory = securityContextFactory;
         this.baseUri = (URI) this.getConfiguration().getProperty(PROPERTY_BASE_URI);
         this.chunkedRequestAssembler = new ChunkedRequestAssembler();
@@ -332,7 +352,7 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
 
         // see http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html, sec 14.18 Date.
         final Date responseDate = new Date();
-        containerRequest.getHeaders().add(HttpHeaders.Names.DATE, HttpDateFormat.getPreferedDateFormat().format(responseDate));
+        containerRequest.getHeaders().add(HttpHeaders.Names.DATE, HttpDateFormat.getPreferredDateFormat().format(responseDate));
         appHandler.handle(containerRequest);
 
         // *sigh*, netty has a list of Map.Entry and jersey wants a map. :/
@@ -413,4 +433,13 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
         channelFuture.addListener(ChannelFutureListener.CLOSE);
     }
 
+    /**
+     * Get the Jersey server-side application handler associated with the container.
+     *
+     * @return Jersey server-side application handler associated with the container.
+     */
+    @Override
+    public ApplicationHandler getApplicationHandler() {
+        return appHandler;
+    }
 }
