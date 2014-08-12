@@ -13,7 +13,7 @@
     </parent>
     <groupId>org.graylog2</groupId>
     <artifactId>jersey-netty</artifactId>
-    <version>1.4</version>
+    <version>1.5-SNAPSHOT</version>
     <name>jersey-netty</name>
     <packaging>jar</packaging>
     <description>Netty 3 container for Jersey 2.0</description>
