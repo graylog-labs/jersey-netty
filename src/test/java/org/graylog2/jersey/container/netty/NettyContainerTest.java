@@ -334,7 +334,7 @@ public class NettyContainerTest {
 
     private AsyncHttpClient getHttpClient() {
         final AsyncHttpClientConfig.Builder clientBuilder = new AsyncHttpClientConfig.Builder();
-        clientBuilder.setAllowPoolingConnection(false);
+        clientBuilder.setAllowPoolingConnections(false);
         final AsyncHttpClientConfig config = clientBuilder.build();
         return new AsyncHttpClient(config);
     }
