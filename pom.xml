@@ -14,7 +14,7 @@
 
     <groupId>org.graylog2</groupId>
     <artifactId>jersey-netty</artifactId>
-    <version>1.6-SNAPSHOT</version>
+    <version>1.5.1-SNAPSHOT</version>
     <name>jersey-netty</name>
     <packaging>jar</packaging>
 
@@ -36,6 +36,27 @@
     </licenses>
 
     <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-gpg-plugin</artifactId>
+                    <version>1.6</version>
+                    <configuration>
+                        <keyname>B1606F22</keyname>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>sign-artifacts</id>
+                            <phase>verify</phase>
+                            <goals>
+                                <goal>sign</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
