@@ -122,9 +122,10 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
                 log.trace("Writing response status and headers {}, length {}", responseContext, length);
             }
 
-            for (Map.Entry<String, List<Object>> headerEntry : responseContext.getHeaders().entrySet()) {
+            for (Map.Entry<String, List<String>> headerEntry : responseContext.getStringHeaders().entrySet()) {
                 HttpHeaders.addHeader(httpResponse, headerEntry.getKey(), join(headerEntry.getValue(), ", "));
             }
+
             if (protocolVersion.equals(HttpVersion.HTTP_1_1) && HttpHeaders.getContentLength(httpResponse, -3L) != -3L) {
                 httpResponse.setChunked(true);
                 HttpHeaders.setTransferEncodingChunked(httpResponse);
@@ -161,13 +162,12 @@ public class NettyContainer extends SimpleChannelUpstreamHandler implements Cont
             }
         }
 
-        private static String join(List<Object> list, String delimiter) {
+        private static String join(Iterable<String> list, String delimiter) {
             final StringBuilder sb = new StringBuilder();
             String currentDelimiter = "";
 
-            for(Object o : list) {
-                sb.append(currentDelimiter);
-                sb.append(o.toString());
+            for(String o : list) {
+                sb.append(currentDelimiter).append(o);
                 currentDelimiter = delimiter;
             }
 
