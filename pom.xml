@@ -14,7 +14,7 @@
 
     <groupId>org.graylog2</groupId>
     <artifactId>jersey-netty</artifactId>
-    <version>1.5.1-SNAPSHOT</version>
+    <version>1.5.1</version>
     <name>jersey-netty</name>
     <packaging>jar</packaging>
 
