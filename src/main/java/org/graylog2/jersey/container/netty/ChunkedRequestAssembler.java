@@ -13,11 +13,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentMap;
 
-/**
- * @author Dennis Oelkers <dennis@torch.sh>
- */
 public class ChunkedRequestAssembler {
-    private static final Logger log = LoggerFactory.getLogger(ChunkedRequestAssembler.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ChunkedRequestAssembler.class);
     private final ConcurrentMap<Channel, List<HttpChunk>> chunkMap;
     private final ConcurrentMap<Channel, HttpRequest> initialRequests;
 
@@ -43,13 +40,23 @@ public class ChunkedRequestAssembler {
                 dstBuffer.writeBytes(chunk.getContent());
             }
         } catch (Exception e) {
-            log.warn("Caught exception: " + e);
+            LOG.warn("Error while assembling HTTP request chunks", e);
         }
 
         return request;
     }
 
     public void addChunk(Channel channel, HttpChunk nextChunk) {
-        chunkMap.get(channel).add(nextChunk);
+        if (nextChunk == null) {
+            LOG.error("Chunk for channel {} was null.", channel);
+            return;
+        }
+
+        final List<HttpChunk> chunks = chunkMap.get(channel);
+        if (chunks == null) {
+            LOG.error("Chunks for channel {} couldn't be found, skipping chunk.", channel);
+        } else {
+            chunks.add(nextChunk);
+        }
     }
 }
